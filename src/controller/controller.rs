@@ -1,10 +1,13 @@
+#[path = "model.rs"]
+mod model;
+
 pub mod crud_config {
     use actix_web::web;
     use crate::controller::crud_controller::{get_route, post_route};
 
     pub fn configure(cfg: &mut web::ServiceConfig) {
         cfg.service(
-            web::scope("/crud")
+            web::scope("/user")
                 .service(get_route)
                 .service(post_route)
         );
@@ -13,49 +16,36 @@ pub mod crud_config {
 
 mod crud_controller {
     use std::collections::HashMap;
-    use actix_web::{get, HttpRequest, HttpResponse, post, Responder, ResponseError, web};
-    use actix_web::body::BoxBody;
-    use actix_web::http::header::ContentType;
-    use derive_more::{Display, Error};
+    use std::error::Error;
+    use actix_web::{get, post, web};
+    use deadpool_postgres::Pool;
     use log::info;
+    use tokio_postgres::types::ToSql;
     use uuid::Uuid;
-    use serde::{Serialize, Deserialize};
+    use crate::controller::model::{CrudError, User};
 
-    #[derive(Serialize, Deserialize)]
-    struct MyReq {
-        id: Option<Uuid>,
-        name: String,
-        age: u8,
-    }
-
-    #[derive(Display, Debug, Error)]
-    #[display(fmt = "catch error: {}", error)]
-    struct CrudError {
-        error: &'static str,
-    }
-
-    impl ResponseError for CrudError {}
-
-    impl Responder for MyReq {
-        type Body = BoxBody;
-
-        fn respond_to(self, _req: &HttpRequest) -> HttpResponse {
-            HttpResponse::Ok()
-                .content_type(ContentType::json())
-                .json(&self)
-        }
-    }
 
     #[get("/{user_name}")]
-    pub async fn get_route(user_name: web::Path<String>, another: web::Query<HashMap<String, String>>) -> String {
+    pub async fn get_route(pool: web::Data<Pool>,
+                           user_name: web::Path<String>,
+                           another: web::Query<HashMap<String, String>>) -> Result<User, Box<dyn Error>> {
         if let Some(data) = another.0.get("another") {
             info!("Some: {}", data)
         }
-        format!("Hello, {user_name}!")
+        let mgr = pool.get().await?;
+        let st = mgr
+            .prepare_cached("SELECT u.* FROM users u WHERE name = $1")
+            .await?;
+
+        let row = mgr.query(&st, &[user_name.as_ref()]).await?.get(0);
+        match row {
+            None => Err(Box::new(CrudError { error: "user not found" })),
+            Some(r) => Ok(User::default())
+        }
     }
 
     #[post("")]
-    pub async fn post_route(rq: web::Json<MyReq>) -> Result<MyReq, CrudError> {
+    pub async fn post_route(rq: web::Json<User>) -> Result<User, CrudError> {
         let mut body = rq.0;
         body.id = match body.id {
             Some(_) => return Err(CrudError { error: "unexpected id" }),
