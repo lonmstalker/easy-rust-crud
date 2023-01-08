@@ -1,10 +1,12 @@
 #[path = "controller/controller.rs"]
 mod controller;
 
+mod app;
 mod datasource;
 
 use actix_web::{App, error, HttpServer, web};
 use log::error;
+use crate::app::app::AppState;
 use crate::controller::crud_config::configure;
 use crate::datasource::datasource::config::create_pool;
 
@@ -27,7 +29,9 @@ async fn main() -> std::io::Result<()> {
                         error::ErrorBadRequest(err)
                     })
             )
-            .app_data(pool.clone())
+            .app_data(web::Data::new(AppState {
+                pool: pool.clone()
+            }))
     })
         .bind(("127.0.0.1", 8080))?
         .run()
